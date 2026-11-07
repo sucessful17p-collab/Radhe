@@ -1,0 +1,158 @@
+"""SignalWard local full-stack demo. Python 3 standard library only; all records are synthetic."""
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
+import json, sqlite3, random, time
+from urllib.parse import urlparse
+from risk_model import train_synthetic_model, make_features, predict
+
+ROOT = Path(__file__).resolve().parent
+DB = ROOT / "data" / "signalward.sqlite3"
+DB.parent.mkdir(exist_ok=True)
+MODEL = train_synthetic_model()
+BASELINE = {"pulse": 72, "spo2": 97, "respiratory_rate": 17, "temperature_c": 36.7, "systolic": 120, "diastolic": 78}
+SCENARIOS = {
+    "stable": ({"pulse": 73, "spo2": 97, "respiratory_rate": 17, "temperature_c": 36.8, "systolic": 121, "diastolic": 79}, {"name": "Mock oxygen concentrator", "connection": "Connected", "power": "Main", "battery_pct": 100}, {"signal_quality_pct": 98, "age_seconds": 4, "sensor": "Demo pulse/SpO₂"}),
+    "watch": ({"pulse": 91, "spo2": 94, "respiratory_rate": 22, "temperature_c": 37.3, "systolic": 130, "diastolic": 84}, {"name": "Mock oxygen concentrator", "connection": "Connected", "power": "Main", "battery_pct": 96}, {"signal_quality_pct": 96, "age_seconds": 5, "sensor": "Demo pulse/SpO₂"}),
+    "artifact": ({"pulse": 111, "spo2": 87, "respiratory_rate": 24, "temperature_c": 37.1, "systolic": 128, "diastolic": 82}, {"name": "Mock oxygen concentrator", "connection": "Connected", "power": "Main", "battery_pct": 92}, {"signal_quality_pct": 24, "age_seconds": 8, "sensor": "Demo pulse/SpO₂ · noisy contact"}),
+    "escalation": ({"pulse": 118, "spo2": 89, "respiratory_rate": 30, "temperature_c": 38.2, "systolic": 150, "diastolic": 92}, {"name": "Mock oxygen concentrator", "connection": "Disconnected", "power": "Backup", "battery_pct": 38}, {"signal_quality_pct": 97, "age_seconds": 4, "sensor": "Demo pulse/SpO₂"}),
+    "backup": ({"pulse": 76, "spo2": 96, "respiratory_rate": 18, "temperature_c": 36.9, "systolic": 122, "diastolic": 80}, {"name": "Mock oxygen concentrator", "connection": "Connected", "power": "Backup", "battery_pct": 82}, {"signal_quality_pct": 94, "age_seconds": 11, "sensor": "Demo pulse/SpO₂"}),
+}
+NOTES = {
+    "en": {"tired": ("Seems more tired than usual", "Seems more tired than usual"), "comfortable": ("Rested and comfortable", "Rested and comfortable"), "breathing": ("Breathing seems harder than usual", "Breathing seems harder than usual")},
+    "hi": {"tired": ("आज सामान्य से अधिक थकान लग रही है", "Seems more tired than usual"), "comfortable": ("आराम में और सहज लग रहे हैं", "Rested and comfortable"), "breathing": ("साँस लेने में सामान्य से अधिक कठिनाई लग रही है", "Breathing seems harder than usual")},
+    "es": {"tired": ("Parece más cansado de lo habitual", "Seems more tired than usual"), "comfortable": ("Descansado y cómodo", "Rested and comfortable"), "breathing": ("Parece respirar con más dificultad", "Breathing seems harder than usual")},
+    "ta": {"tired": ("வழக்கத்தை விட அதிக சோர்வாகத் தெரிகிறார்", "Seems more tired than usual"), "comfortable": ("ஓய்வாகவும் வசதியாகவும் உள்ளார்", "Rested and comfortable"), "breathing": ("வழக்கத்தை விட சுவாசம் கடினமாகத் தெரிகிறது", "Breathing seems harder than usual")},
+}
+
+
+def connect():
+    db = sqlite3.connect(DB)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def initialize():
+    with connect() as db:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY, at REAL NOT NULL, scenario TEXT NOT NULL, vitals TEXT NOT NULL, equipment TEXT NOT NULL, telemetry TEXT NOT NULL DEFAULT '{}', risk TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'simulator');
+        CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, at REAL NOT NULL, caregiver TEXT NOT NULL, language TEXT NOT NULL, original TEXT NOT NULL, english TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY, at REAL NOT NULL, level TEXT NOT NULL, score REAL NOT NULL, reasons TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'Open', acknowledged_by TEXT, kind TEXT NOT NULL DEFAULT 'patient_trend');
+        CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY, at REAL NOT NULL, caregiver TEXT NOT NULL, action TEXT NOT NULL, activity TEXT NOT NULL);
+        """)
+        count = db.execute("SELECT count(*) FROM readings").fetchone()[0]
+        reading_columns = {row[1] for row in db.execute("PRAGMA table_info(readings)")}
+        if "telemetry" not in reading_columns:
+            db.execute("ALTER TABLE readings ADD COLUMN telemetry TEXT NOT NULL DEFAULT '{}' ")
+        alert_columns = {row[1] for row in db.execute("PRAGMA table_info(alerts)")}
+        if "kind" not in alert_columns:
+            db.execute("ALTER TABLE alerts ADD COLUMN kind TEXT NOT NULL DEFAULT 'patient_trend'")
+        count = db.execute("SELECT count(*) FROM readings").fetchone()[0]
+        if not count:
+            vitals, equipment, telemetry = SCENARIOS["stable"]
+            risk = make_risk(vitals, equipment, telemetry, None, "")
+            store_reading(db, "stable", vitals, equipment, telemetry, risk, "initial synthetic seed")
+
+
+def make_risk(vitals, equipment, telemetry, previous, note):
+    features = make_features(vitals, BASELINE, previous, note)
+    return predict(MODEL, features, telemetry, equipment)
+
+
+def store_reading(db, scenario, vitals, equipment, telemetry, risk, source="simulator"):
+    now = time.time()
+    cur = db.execute("INSERT INTO readings(at,scenario,vitals,equipment,telemetry,risk,source) VALUES(?,?,?,?,?,?,?)", (now, scenario, json.dumps(vitals), json.dumps(equipment), json.dumps(telemetry), json.dumps(risk), source))
+    should_alert = risk["level"] in ("medium", "high", "uncertain", "device")
+    if should_alert:
+        score = float(risk.get("probability") or 0.0)
+        alert_reasons = list(dict.fromkeys(risk["reasons"] + risk.get("equipment_flags", [])))
+        db.execute("INSERT INTO alerts(at,level,score,reasons,state,kind) VALUES(?,?,?,?, 'Open', ?)", (now, risk["level"], score, json.dumps(alert_reasons), risk["classification"]))
+    return cur.lastrowid
+
+
+def as_reading(row):
+    vitals = json.loads(row["vitals"])
+    equipment = json.loads(row["equipment"])
+    telemetry = json.loads(row["telemetry"] or "{}")
+    if not telemetry:
+        telemetry = {"signal_quality_pct": 95, "age_seconds": 4, "sensor": "Migrated synthetic fixture"}
+    risk = json.loads(row["risk"])
+    if "classification" not in risk:
+        risk = make_risk(vitals, equipment, telemetry, None, "")
+    return {"id": row["id"], "at": row["at"], "scenario": row["scenario"], "vitals": vitals, "equipment": equipment, "telemetry": telemetry, "risk": risk, "source": row["source"]}
+
+
+def state():
+    with connect() as db:
+        readings = [as_reading(r) for r in db.execute("SELECT * FROM readings ORDER BY id DESC LIMIT 24")]
+        notes = [dict(r) for r in db.execute("SELECT id,at,caregiver,language,original,english FROM notes ORDER BY id DESC LIMIT 8")]
+        alerts = [dict(r) for r in db.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 12")]
+        for a in alerts: a["reasons"] = json.loads(a["reasons"])
+        attendance = [dict(r) for r in db.execute("SELECT * FROM attendance ORDER BY id DESC LIMIT 8")]
+        active = db.execute("SELECT count(*) FROM alerts WHERE state='Open'").fetchone()[0]
+    return {"patient": {"alias": "Patient A", "type": "Synthetic demo profile", "baseline": BASELINE}, "readings": readings, "latest": readings[0], "notes": notes, "alerts": alerts, "open_alert_count": active, "attendance": attendance, "model": {"kind": "Synthetic-data logistic regression", "training_rows": MODEL["training_rows"], "label": MODEL["label"], "warning": "Illustrative only; not clinically validated or for care decisions."}, "server_time": time.time()}
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs): super().__init__(*args, directory=str(ROOT), **kwargs)
+    def log_message(self, fmt, *args): pass
+    def send_json(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+    def read_json(self):
+        size = min(int(self.headers.get("Content-Length", "0")), 100000)
+        return json.loads(self.rfile.read(size) or b"{}")
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/api/state": return self.send_json(state())
+        if path == "/api/health": return self.send_json({"ok": True, "mode": "synthetic-demo", "persistence": "sqlite"})
+        return super().do_GET()
+    def do_POST(self):
+        path = urlparse(self.path).path
+        try: body = self.read_json()
+        except Exception: return self.send_json({"error": "Invalid JSON"}, 400)
+        if path == "/api/simulate":
+            scenario = body.get("scenario", "stable")
+            if scenario not in SCENARIOS: return self.send_json({"error": "Choose stable, watch, noisy-sensor, escalation, or backup."}, 400)
+            vitals, equipment, telemetry = SCENARIOS[scenario]
+            # Small deterministic-looking jitter keeps demo readings realistic without implying a real sensor.
+            jitter = random.randint(-1, 1)
+            vitals = dict(vitals); vitals["pulse"] += jitter; vitals["systolic"] += jitter
+            note = body.get("english_note", "")[:500]
+            with connect() as db:
+                prevrow = db.execute("SELECT * FROM readings ORDER BY id DESC LIMIT 1").fetchone()
+                previous = as_reading(prevrow) if prevrow else None
+                risk = make_risk(vitals, equipment, telemetry, previous, note)
+                store_reading(db, scenario, vitals, equipment, telemetry, risk, body.get("source", "simulator"))
+            return self.send_json({"ok": True, "risk": risk, "state": state()})
+        if path == "/api/notes":
+            lang, phrase = body.get("language", "en"), body.get("phrase", "comfortable")
+            item = NOTES.get(lang, NOTES["en"]).get(phrase)
+            if not item: return self.send_json({"error": "Choose a demo phrase from the phrasebook."}, 400)
+            original, english = item
+            caregiver = str(body.get("caregiver", "Caregiver Demo"))[:80]
+            with connect() as db:
+                db.execute("INSERT INTO notes(at,caregiver,language,original,english) VALUES(?,?,?,?,?)", (time.time(), caregiver, lang, original, english))
+            return self.send_json({"ok": True, "original": original, "english": english, "state": state()})
+        if path == "/api/attendance":
+            action = body.get("action", "check-in")
+            activity = str(body.get("activity", "Care visit check-in"))[:120]
+            caregiver = str(body.get("caregiver", "Caregiver Demo"))[:80]
+            if str(body.get("code", "")) != "2468": return self.send_json({"error": "Demo shift code did not match."}, 403)
+            with connect() as db:
+                db.execute("INSERT INTO attendance(at,caregiver,action,activity) VALUES(?,?,?,?)", (time.time(), caregiver, action, activity))
+            return self.send_json({"ok": True, "state": state()})
+        if path.startswith("/api/alerts/") and path.endswith("/ack"):
+            try: alert_id = int(path.split("/")[3])
+            except Exception: return self.send_json({"error": "Invalid alert id."}, 400)
+            with connect() as db:
+                cur = db.execute("UPDATE alerts SET state='Acknowledged', acknowledged_by=? WHERE id=? AND state='Open'", (str(body.get("caregiver", "Caregiver Demo"))[:80], alert_id))
+                if cur.rowcount == 0: return self.send_json({"error": "Alert is already acknowledged or missing."}, 404)
+            return self.send_json({"ok": True, "state": state()})
+        return self.send_json({"error": "Not found"}, 404)
+
+if __name__ == "__main__":
+    initialize()
+    host, port = "127.0.0.1", 8765
+    print(f"SignalWard demo at http://{host}:{port} (synthetic data only; Ctrl+C to stop)")
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
+
