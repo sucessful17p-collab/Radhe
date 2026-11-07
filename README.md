@@ -6,6 +6,8 @@ SignalWard is a hardware-free, local-first prototype that demonstrates how a hom
 
 The landing view uses an interactive split-screen reveal: drag between the caregiver-facing home view and an annotated system blueprint. The rest of the dashboard keeps its simulator, review, device, and caregiver workflows below the fold.
 
+The portfolio-inspired tour also includes filterable synthetic case files, a four-round workflow-matching challenge with a browser-local best score, a visual release timeline, and a read-only command widget for jumping to demo areas.
+
 > **Simulation only.** All readings, profiles, notes, equipment conditions, signal-quality values, and model outputs are synthetic. The model is not clinically validated and must never be used to diagnose, forecast a real patient's condition, or guide treatment.
 
 ## Why SignalWard
