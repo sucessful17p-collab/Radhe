@@ -48,6 +48,9 @@ Offline browser actions ─▶ localStorage queue ─▶ sync on reconnect
 - Tables: `readings` (including telemetry quality), `notes`, `alerts` (including alert kind), `attendance`.
 - `GET /api/state` returns the synthetic baseline, readings, telemetry, risk classification, alerts, notes, and visit events.
 - `POST /api/simulate` accepts `stable`, `watch`, `artifact`, `escalation`, or `backup`.
+- `POST /api/simulator/evaluate` validates fictional vitals and an optional English note, runs the existing generated-data model and evidence gate, and returns reasons plus a workflow next move. It does not persist Scenario Lab inputs.
+- `POST /api/agent/review` independently recomputes a fictional scenario and checks bounds and evidence-gate behavior. It is a deterministic policy reviewer, not an LLM, external service, or clinical decision-maker; it returns no stored records.
+- `POST /api/vision/predict` accepts bounded numeric geometry features only (`aspect`, `floor_proximity`, `motion`, `frame_quality`). The browser canvas is not serialized; no image bytes or camera feed reach the server.
 - `POST /api/notes` stores a fixed multilingual phrase and its English equivalent.
 - `POST /api/attendance` checks a demo code and records an activity.
 - `POST /api/alerts/{id}/ack` records an acknowledgement.
@@ -93,3 +96,11 @@ Use only the built-in scenarios. Confirm that noisy packets route to Evidence Ch
 ## 9. Safety context
 
 The FDA notes that pulse oximeters have limitations and can be inaccurate in some circumstances. Clinical decision support is intended to support, not replace, clinician judgment. See [FDA pulse oximeter overview](https://www.fda.gov/medical-devices/products-and-medical-procedures/pulse-oximeters) and [eCQI clinical decision support overview](https://ecqi.healthit.gov/cds/about). SignalWard’s model is only a synthetic systems demo and must never guide care.
+
+## 10. Scenario Lab and generated-scene analysis
+
+The Scenario Lab is stateless: it validates simulator input bounds, compares values with the configured demo baseline, applies the existing synthetic logistic model and evidence gate, and returns reasons plus a non-medical workflow prompt. Invalid or missing fields receive HTTP 400. Numeric values and notes are not inserted into SQLite.
+
+The canvas renderer makes fictional scenes (upright, seated, floor-level transition, or occluded). The demo maps each generated posture to geometric features. `/api/vision/predict` computes a transparent weighted pattern score and confidence gate. This is a computer-vision concept demo, not a trained vision model, medical device, actual fall detector, or validated risk predictor. It does not request camera permissions and transmits only numbers. Low-quality synthetic frames produce a withheld result. Every “next move” is a simulated caregiver-workflow prompt, not a clinical intervention.
+
+The in-app **How to demo** guide walks participants through the sensor scenarios, Scenario Lab, independent review, generated-scene analysis, and caregiver acknowledgement. The Review Agent’s independent recomputation is intentionally explainable and deterministic so judges can inspect the checks; it is not marketed as a general-purpose AI agent.

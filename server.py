@@ -58,6 +58,78 @@ def make_risk(vitals, equipment, telemetry, previous, note):
     return predict(MODEL, features, telemetry, equipment)
 
 
+def scenario_evaluation(body):
+    """Score user-entered synthetic values; do not persist them."""
+    fields = {"pulse": (35, 220), "spo2": (50, 100), "respiratory_rate": (5, 70),
+              "temperature_c": (30, 43), "systolic": (50, 260), "diastolic": (25, 160)}
+    vitals = {}
+    for key, (low, high) in fields.items():
+        try: value = float(body.get(key))
+        except (TypeError, ValueError): raise ValueError(f"Enter a number for {key}.")
+        if not low <= value <= high: raise ValueError(f"{key} must be between {low} and {high} for this demo.")
+        vitals[key] = value
+    telemetry = {"signal_quality_pct": max(0, min(100, float(body.get("signal_quality_pct", 95)))),
+                 "age_seconds": max(0, min(3600, float(body.get("age_seconds", 5)))), "sensor": "Scenario Lab synthetic input"}
+    equipment = {"connection": "Connected", "battery_pct": 100}
+    note = str(body.get("note", ""))[:500]
+    risk = make_risk(vitals, equipment, telemetry, None, note)
+    if risk["classification"] == "evidence_check":
+        next_move = "Evidence check: verify the simulated reading and source quality before interpreting it."
+    elif risk["level"] == "high":
+        next_move = "Human review prompt: route to the designated caregiver and follow the documented demo care plan."
+    elif risk["level"] == "medium":
+        next_move = "Context review: check the simulated note and trend, then follow the documented demo care plan."
+    else:
+        next_move = "Continue routine demo observation; no care decision is implied."
+    return {"risk": risk, "next_move": next_move, "simulation_only": True, "persisted": False}
+
+
+def vision_prediction(body):
+    """Classify geometric features from generated canvas frames; never accept image bytes."""
+    try:
+        aspect = float(body.get("aspect", 0.5))
+        floor = float(body.get("floor_proximity", 0.0))
+        motion = float(body.get("motion", 0.0))
+        quality = float(body.get("frame_quality", 1.0))
+    except (TypeError, ValueError): raise ValueError("Vision features must be numeric.")
+    if not (0.1 <= aspect <= 3 and 0 <= floor <= 1 and 0 <= motion <= 1 and 0 <= quality <= 1):
+        raise ValueError("Vision features are outside the supported demo range.")
+    # Transparent, hand-weighted classifier over synthetic geometric features; not a clinical model.
+    score = min(0.99, max(0.01, 0.08 + 0.48 * floor + 0.38 * motion + 0.14 * max(0, aspect - 1.0)))
+    confidence = round((0.5 + abs(score - 0.5)) * quality, 2)
+    if quality < 0.35 or confidence < 0.58:
+        label, next_move = "withheld_low_quality", "Visual check: generated frame quality is too low to label this pattern."
+    elif score >= 0.65:
+        label, next_move = "floor_level_transition_pattern", "Human review prompt: check the generated scene and follow the documented demo workflow."
+    else:
+        label, next_move = "upright_or_seated_pattern", "Continue demo observation; no event is inferred."
+    return {"label": label, "confidence": confidence, "pattern_score": round(score, 2),
+            "reason": f"Generated geometry: floor proximity {floor:.2f}, motion {motion:.2f}, frame quality {quality:.2f}.",
+            "next_move": next_move, "simulation_only": True, "image_received": False}
+
+
+def agent_review(body):
+    """Independent deterministic reviewer for simulator output; no external AI service or storage."""
+    reviewed = scenario_evaluation(body)
+    risk = reviewed["risk"]
+    checks = ["Input values passed simulator bounds validation", "Risk tier recomputed server-side from synthetic inputs"]
+    claimed = str(body.get("claimed_level", "")).lower()
+    consistent = not claimed or claimed == risk["level"]
+    if not consistent:
+        checks.append(f"Submitted tier ({claimed}) differs from recomputed tier ({risk['level']})")
+    if risk["classification"] == "evidence_check":
+        checks.append("Evidence gate is active; patient-pattern score should remain withheld")
+    else:
+        checks.append("Evidence gate passed for demo scoring only; confidence is not clinical reliability")
+    return {"agent": "SignalWard Review Agent", "review_mode": "deterministic policy cross-check",
+            "status": "CHECK" if not consistent or risk["classification"] == "evidence_check" else "REVIEWED",
+            "consistent": consistent, "checks": checks,
+            "summary": "The agent recomputed this fictional scenario and checked evidence-gate handling.",
+            "risk_level": risk["level"], "classification": risk["classification"],
+            "evidence_confidence_pct": risk["evidence"]["confidence_pct"],
+            "workflow_prompt": reviewed["next_move"], "simulation_only": True, "persisted": False}
+
+
 def store_reading(db, scenario, vitals, equipment, telemetry, risk, source="simulator"):
     now = time.time()
     cur = db.execute("INSERT INTO readings(at,scenario,vitals,equipment,telemetry,risk,source) VALUES(?,?,?,?,?,?,?)", (now, scenario, json.dumps(vitals), json.dumps(equipment), json.dumps(telemetry), json.dumps(risk), source))
@@ -110,6 +182,15 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         try: body = self.read_json()
         except Exception: return self.send_json({"error": "Invalid JSON"}, 400)
+        if path == "/api/simulator/evaluate":
+            try: return self.send_json(scenario_evaluation(body))
+            except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
+        if path == "/api/agent/review":
+            try: return self.send_json(agent_review(body))
+            except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
+        if path == "/api/vision/predict":
+            try: return self.send_json(vision_prediction(body))
+            except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
         if path == "/api/simulate":
             scenario = body.get("scenario", "stable")
             if scenario not in SCENARIOS: return self.send_json({"error": "Choose stable, watch, noisy-sensor, escalation, or backup."}, 400)

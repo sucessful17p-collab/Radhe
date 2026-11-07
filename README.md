@@ -20,6 +20,10 @@ A single abnormal reading can reflect a change in the patient, a poor measuremen
 - **Device context:** connection and backup-power state stay separate from patient physiology.
 - **Caregiver workflow:** alert acknowledgement, demo attendance logging, and fixed phrasebook notes in English, Hindi, Spanish, and Tamil.
 - **Resilience demo:** a browser `localStorage` outbox queues actions during simulated offline mode and syncs after reconnection.
+- **Scenario Lab + health simulator API:** enter fictional vitals and an English observation to receive a synthetic risk tier, reason, evidence confidence, and safe workflow next move. These one-off evaluations are not persisted.
+- **Generated-scene vision demo:** a browser canvas draws synthetic postures, derives simple geometry features, and sends only those numbers to the API. No camera, image upload, or image storage is used; output is illustrative, not fall detection.
+- **Review Agent API:** a second, deterministic reviewer independently recomputes a scenario and checks input bounds and evidence-gate handling. It uses local policy logic, no external AI service, and does not store the result.
+- **Built-in demo guide:** a step-by-step walkthrough explains the sensor simulator, scenario lab, review agent, vision demo, and caregiver response loop.
 - **Local-only design:** Python standard library, SQLite, HTML, CSS, and vanilla JavaScript; no cloud APIs or package installation.
 
 ## Run locally
@@ -81,7 +85,7 @@ Stop the server, remove `data/signalward.sqlite3`, and clear the browser's local
 
 ## Known limitations
 
-This is a hackathon prototype, not a clinical product. The signal-quality input is itself simulated and does not establish sensor accuracy. The phrasebook is a fixed set of example phrases, not a general translation service. The demo code does not verify identity or physical presence. Offline sync is a simple store-and-forward demonstration, not a guaranteed delivery protocol. The server binds to localhost and is not designed for internet exposure. There is no real sensor, identity provider, external notification channel, or clinician-approved threshold.
+This is a hackathon prototype, not a clinical product. Scenario Lab inputs are fictional and evaluated in memory; its model is trained only on generated examples. The Review Agent is deterministic policy cross-checking, not an LLM or clinical reviewer. “Next move” means a software workflow prompt for demo review, never treatment advice. The vision panel draws generated shapes and uses a transparent geometric heuristic; it does not inspect people or detect real falls. Signal-quality input is simulated and does not establish sensor accuracy. The phrasebook is fixed example text. The demo code does not verify identity or physical presence. Offline sync is store-and-forward, not guaranteed delivery. There is no real sensor, identity provider, external notification channel, or clinician-approved threshold.
 
 ## Team
 
