@@ -30,6 +30,7 @@ A single abnormal reading can reflect a change in the patient, a poor measuremen
 - **Review Agent API:** a second, deterministic reviewer independently recomputes a scenario and checks input bounds and evidence-gate handling. It uses local policy logic, no external AI service, and does not store the result.
 - **Built-in demo guide:** a step-by-step walkthrough explains the sensor simulator, scenario lab, review agent, vision demo, and caregiver response loop.
 - **Home-device adapters:** mock pulse oximeter, blood-pressure cuff, thermometer, smart scale, and glucose meter APIs emit a shared normalized packet format for integration demos.
+- **FHIR R4 export:** preview or download a FHIR Collection Bundle containing one clearly tagged synthetic Patient and six LOINC-coded vital-sign Observations with UCUM units.
 - **Local-only design:** Python standard library, SQLite, HTML, CSS, and vanilla JavaScript; no cloud APIs or package installation.
 
 ## Run locally

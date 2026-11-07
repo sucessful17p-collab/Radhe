@@ -54,6 +54,7 @@ Offline browser actions ─▶ localStorage queue ─▶ sync on reconnect
 - `POST /api/vision/events` accepts a gated possible-event envelope (`event_type`, `pose_visibility`, `duration_seconds`, generic `zone`). It rejects image/video/frame/landmark fields and writes only an alert record.
 - `GET /api/devices/catalog` returns the supported simulated home-device types and measurement codes.
 - `POST /api/devices/simulate` accepts `{ "device_type": "pulse_oximeter", "mode": "baseline" }` and returns a normalized synthetic device envelope. Supported types: `pulse_oximeter`, `blood_pressure_cuff`, `thermometer`, `smart_scale`, and `glucose_meter`; modes: `baseline` or `variation`.
+- `GET /api/fhir/r4/Bundle` returns a FHIR R4 Collection Bundle with one synthetic Patient resource and six latest-snapshot Observation resources.
 - `POST /api/notes` stores a fixed multilingual phrase and its English equivalent.
 - `POST /api/attendance` checks a demo code and records an activity.
 - `POST /api/alerts/{id}/ack` records an acknowledgement.
@@ -109,6 +110,10 @@ The canvas renderer makes fictional scenes (upright, seated, floor-level transit
 The in-app **How to demo** guide walks participants through the sensor scenarios, Scenario Lab, independent review, generated-scene analysis, and caregiver acknowledgement. The Review Agent’s independent recomputation is intentionally explainable and deterministic so judges can inspect the checks; it is not marketed as a general-purpose AI agent.
 
 The Home Device Adapters provide a vendor-neutral mock envelope with a simulator device ID, timestamp, normalized measurement codes/units, and synthetic quality metadata. The UI can request a baseline or variation packet and displays both its measurements and JSON response. These routes do not claim compatibility with any specific vendor SDK or FHIR implementation and return no medical interpretation. They neither collect external device credentials nor connect to hardware.
+
+### FHIR R4 interoperability export
+
+The export endpoint follows the FHIR R4 Bundle `collection` shape. It includes a Patient with a fixed demo-only identifier and an explicit synthetic metadata tag, plus six `Observation` resources for heart rate, pulse-oximetry oxygen saturation, respiratory rate, body temperature, systolic pressure, and diastolic pressure. Observation codes use LOINC; quantities use UCUM units. The UI can preview or download the JSON as `application/fhir+json`. It is a standards-shaped export from synthetic data, not a certified FHIR server, production profile, authenticated exchange, or external clinical connection. See the [FHIR R4 Observation specification](https://hl7.org/fhir/R4/observation.html) and [FHIR R4 Bundle specification](https://hl7.org/fhir/R4/bundle.html).
 
 ### Opt-in local webcam prototype
 

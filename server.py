@@ -219,17 +219,54 @@ def state():
     return {"patient": {"alias": "Patient A", "type": "Synthetic demo profile", "baseline": BASELINE}, "readings": readings, "latest": readings[0], "notes": notes, "alerts": alerts, "open_alert_count": active, "attendance": attendance, "model": {"kind": "Synthetic-data logistic regression", "training_rows": MODEL["training_rows"], "label": MODEL["label"], "warning": "Illustrative only; not clinically validated or for care decisions."}, "server_time": time.time()}
 
 
+def fhir_r4_bundle():
+    """Export the latest synthetic vitals using FHIR R4 Patient, Bundle and Observation shapes."""
+    current = state()["latest"]
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(current["at"]))
+    patient = {
+        "resourceType": "Patient", "id": "synthetic-patient-a",
+        "meta": {"tag": [{"system": "https://signalward.local/tags", "code": "synthetic", "display": "Synthetic demo record"}]},
+        "identifier": [{"system": "https://signalward.local/synthetic-id", "value": "PATIENT-A-DEMO"}],
+        "active": True, "name": [{"text": "Patient A (synthetic demo profile)"}],
+    }
+    definitions = [
+        ("pulse", "8867-4", "Heart rate", "beats/min", "/min"),
+        ("spo2", "59408-5", "Oxygen saturation in Arterial blood by Pulse oximetry", "%", "%"),
+        ("respiratory_rate", "9279-1", "Respiratory rate", "breaths/min", "/min"),
+        ("temperature_c", "8310-5", "Body temperature", "°C", "Cel"),
+        ("systolic", "8480-6", "Systolic blood pressure", "mmHg", "mm[Hg]"),
+        ("diastolic", "8462-4", "Diastolic blood pressure", "mmHg", "mm[Hg]"),
+    ]
+    entries = [{"fullUrl": "urn:uuid:signalward-synthetic-patient-a", "resource": patient}]
+    vitals = current["vitals"]
+    for key, code, display, unit, ucum in definitions:
+        observation_id = f"synthetic-{key.replace('_', '-')}"
+        observation = {
+            "resourceType": "Observation", "id": observation_id,
+            "meta": {"tag": [{"system": "https://signalward.local/tags", "code": "synthetic", "display": "Synthetic demo measurement"}]},
+            "status": "final",
+            "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs", "display": "Vital Signs"}]}],
+            "code": {"coding": [{"system": "http://loinc.org", "code": code, "display": display}], "text": display},
+            "subject": {"reference": "Patient/synthetic-patient-a"},
+            "effectiveDateTime": at,
+            "valueQuantity": {"value": vitals[key], "unit": unit, "system": "http://unitsofmeasure.org", "code": ucum},
+        }
+        entries.append({"fullUrl": f"urn:uuid:signalward-{observation_id}", "resource": observation})
+    return {"resourceType": "Bundle", "id": "signalward-synthetic-vitals", "meta": {"tag": [{"system": "https://signalward.local/tags", "code": "synthetic", "display": "Synthetic demo export; not for clinical use"}]}, "type": "collection", "timestamp": at, "total": len(entries), "entry": entries}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs): super().__init__(*args, directory=str(ROOT), **kwargs)
     def log_message(self, fmt, *args): pass
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, content_type="application/json; charset=utf-8"):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
     def read_json(self):
         size = min(int(self.headers.get("Content-Length", "0")), 100000)
         return json.loads(self.rfile.read(size) or b"{}")
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/fhir/r4/Bundle": return self.send_json(fhir_r4_bundle(), content_type="application/fhir+json; charset=utf-8")
         if path == "/api/devices/catalog":
             return self.send_json({"api_version": "signalward-device-demo-v1", "simulation_only": True,
                                    "devices": [{"type": key, "display_name": value["name"], "measurements": [code for code, _, _, _ in value["metrics"]]} for key, value in DEVICE_CATALOG.items()]})
