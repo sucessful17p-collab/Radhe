@@ -40,6 +40,13 @@ python3 server.py
 
 Then open [http://127.0.0.1:8765](http://127.0.0.1:8765). Use demo code `2468` for attendance logging. Stop the server with `Ctrl+C`.
 
+## Deploy on Render
+
+This project is a standard Python HTTP server with an HTML/CSS/JavaScript frontend; it is not a Streamlit app. To deploy it on Render, push the repository, then choose **New > Blueprint** and connect this repository. Render reads `render.yaml`; there is no Streamlit-style main file path. The web service binds to the platform-provided `PORT` and `0.0.0.0` while local runs remain on `127.0.0.1:8765`.
+
+The demo stores SQLite data under `data/`. Render's default filesystem is ephemeral, so records may reset during redeploys or restarts. Use synthetic data only; this prototype has no production authentication or clinical safeguards.
+
+Alternatively, deploy the `Dockerfile` on a container host that accepts HTTP on port `10000`.
 ## Three-minute demo path
 
 1. Select **Stable** and point out the synthetic sensor packet and evidence confidence.
@@ -85,3 +92,4 @@ This is a hackathon prototype, not a clinical product. The signal-quality input 
 
 - [FDA: Pulse Oximeters](https://www.fda.gov/medical-devices/products-and-medical-procedures/pulse-oximeters)
 - [eCQI Resource Center: Clinical Decision Support](https://ecqi.healthit.gov/cds/about)
+

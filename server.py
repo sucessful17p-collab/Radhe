@@ -1,7 +1,7 @@
 """SignalWard local full-stack demo. Python 3 standard library only; all records are synthetic."""
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-import json, sqlite3, random, time
+import json, os, sqlite3, random, time
 from urllib.parse import urlparse
 from risk_model import train_synthetic_model, make_features, predict
 
@@ -152,7 +152,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     initialize()
-    host, port = "127.0.0.1", 8765
+    # Stay local by default; hosted platforms provide PORT and require a public interface.
+    host = os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+    port = int(os.environ.get("PORT", "8765"))
     print(f"SignalWard demo at http://{host}:{port} (synthetic data only; Ctrl+C to stop)")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
