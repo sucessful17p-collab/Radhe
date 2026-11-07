@@ -17,12 +17,35 @@ SCENARIOS = {
     "escalation": ({"pulse": 118, "spo2": 89, "respiratory_rate": 30, "temperature_c": 38.2, "systolic": 150, "diastolic": 92}, {"name": "Mock oxygen concentrator", "connection": "Disconnected", "power": "Backup", "battery_pct": 38}, {"signal_quality_pct": 97, "age_seconds": 4, "sensor": "Demo pulse/SpO₂"}),
     "backup": ({"pulse": 76, "spo2": 96, "respiratory_rate": 18, "temperature_c": 36.9, "systolic": 122, "diastolic": 80}, {"name": "Mock oxygen concentrator", "connection": "Connected", "power": "Backup", "battery_pct": 82}, {"signal_quality_pct": 94, "age_seconds": 11, "sensor": "Demo pulse/SpO₂"}),
 }
+DEVICE_CATALOG = {
+    "pulse_oximeter": {"name": "Pulse oximeter", "metrics": [("oxygen_saturation", "%", 97, 91), ("pulse", "bpm", 72, 103)]},
+    "blood_pressure_cuff": {"name": "Blood-pressure cuff", "metrics": [("systolic_pressure", "mmHg", 120, 148), ("diastolic_pressure", "mmHg", 78, 92), ("pulse", "bpm", 72, 96)]},
+    "thermometer": {"name": "Digital thermometer", "metrics": [("body_temperature", "°C", 36.7, 38.1)]},
+    "smart_scale": {"name": "Connected scale", "metrics": [("body_weight", "kg", 68.4, 70.2)]},
+    "glucose_meter": {"name": "Glucose meter", "metrics": [("blood_glucose", "mg/dL", 98, 164)]},
+}
 NOTES = {
     "en": {"tired": ("Seems more tired than usual", "Seems more tired than usual"), "comfortable": ("Rested and comfortable", "Rested and comfortable"), "breathing": ("Breathing seems harder than usual", "Breathing seems harder than usual")},
     "hi": {"tired": ("आज सामान्य से अधिक थकान लग रही है", "Seems more tired than usual"), "comfortable": ("आराम में और सहज लग रहे हैं", "Rested and comfortable"), "breathing": ("साँस लेने में सामान्य से अधिक कठिनाई लग रही है", "Breathing seems harder than usual")},
     "es": {"tired": ("Parece más cansado de lo habitual", "Seems more tired than usual"), "comfortable": ("Descansado y cómodo", "Rested and comfortable"), "breathing": ("Parece respirar con más dificultad", "Breathing seems harder than usual")},
     "ta": {"tired": ("வழக்கத்தை விட அதிக சோர்வாகத் தெரிகிறார்", "Seems more tired than usual"), "comfortable": ("ஓய்வாகவும் வசதியாகவும் உள்ளார்", "Rested and comfortable"), "breathing": ("வழக்கத்தை விட சுவாசம் கடினமாகத் தெரிகிறது", "Breathing seems harder than usual")},
 }
+
+
+def simulate_device_packet(body):
+    device_type = str(body.get("device_type", ""))
+    mode = str(body.get("mode", "baseline"))
+    spec = DEVICE_CATALOG.get(device_type)
+    if not spec: raise ValueError("Choose a supported simulated device from the catalog.")
+    if mode not in ("baseline", "variation"): raise ValueError("Mode must be baseline or variation.")
+    variation = mode == "variation"
+    measurements = [{"code": code, "value": varied if variation else base, "unit": unit}
+                    for code, unit, base, varied in spec["metrics"]]
+    now = time.time()
+    return {"api_version": "signalward-device-demo-v1", "device": {"type": device_type, "display_name": spec["name"], "device_id": f"SIM-{device_type.upper()}-001", "connection": "simulated"},
+            "observed_at": now, "measurements": measurements,
+            "quality": {"status": "synthetic", "mode": mode}, "simulation_only": True,
+            "clinical_interpretation": None, "note": "No real device is connected; sample values are fictional."}
 
 
 def connect():
@@ -175,6 +198,9 @@ class Handler(SimpleHTTPRequestHandler):
         return json.loads(self.rfile.read(size) or b"{}")
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/devices/catalog":
+            return self.send_json({"api_version": "signalward-device-demo-v1", "simulation_only": True,
+                                   "devices": [{"type": key, "display_name": value["name"], "measurements": [code for code, _, _, _ in value["metrics"]]} for key, value in DEVICE_CATALOG.items()]})
         if path == "/api/state": return self.send_json(state())
         if path == "/api/health": return self.send_json({"ok": True, "mode": "synthetic-demo", "persistence": "sqlite"})
         return super().do_GET()
@@ -182,6 +208,9 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         try: body = self.read_json()
         except Exception: return self.send_json({"error": "Invalid JSON"}, 400)
+        if path == "/api/devices/simulate":
+            try: return self.send_json(simulate_device_packet(body))
+            except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
         if path == "/api/simulator/evaluate":
             try: return self.send_json(scenario_evaluation(body))
             except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)

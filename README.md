@@ -24,6 +24,7 @@ A single abnormal reading can reflect a change in the patient, a poor measuremen
 - **Generated-scene vision demo:** a browser canvas draws synthetic postures, derives simple geometry features, and sends only those numbers to the API. No camera, image upload, or image storage is used; output is illustrative, not fall detection.
 - **Review Agent API:** a second, deterministic reviewer independently recomputes a scenario and checks input bounds and evidence-gate handling. It uses local policy logic, no external AI service, and does not store the result.
 - **Built-in demo guide:** a step-by-step walkthrough explains the sensor simulator, scenario lab, review agent, vision demo, and caregiver response loop.
+- **Home-device adapters:** mock pulse oximeter, blood-pressure cuff, thermometer, smart scale, and glucose meter APIs emit a shared normalized packet format for integration demos.
 - **Local-only design:** Python standard library, SQLite, HTML, CSS, and vanilla JavaScript; no cloud APIs or package installation.
 
 ## Run locally

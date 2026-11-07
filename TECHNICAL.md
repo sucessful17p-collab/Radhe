@@ -51,6 +51,8 @@ Offline browser actions ─▶ localStorage queue ─▶ sync on reconnect
 - `POST /api/simulator/evaluate` validates fictional vitals and an optional English note, runs the existing generated-data model and evidence gate, and returns reasons plus a workflow next move. It does not persist Scenario Lab inputs.
 - `POST /api/agent/review` independently recomputes a fictional scenario and checks bounds and evidence-gate behavior. It is a deterministic policy reviewer, not an LLM, external service, or clinical decision-maker; it returns no stored records.
 - `POST /api/vision/predict` accepts bounded numeric geometry features only (`aspect`, `floor_proximity`, `motion`, `frame_quality`). The browser canvas is not serialized; no image bytes or camera feed reach the server.
+- `GET /api/devices/catalog` returns the supported simulated home-device types and measurement codes.
+- `POST /api/devices/simulate` accepts `{ "device_type": "pulse_oximeter", "mode": "baseline" }` and returns a normalized synthetic device envelope. Supported types: `pulse_oximeter`, `blood_pressure_cuff`, `thermometer`, `smart_scale`, and `glucose_meter`; modes: `baseline` or `variation`.
 - `POST /api/notes` stores a fixed multilingual phrase and its English equivalent.
 - `POST /api/attendance` checks a demo code and records an activity.
 - `POST /api/alerts/{id}/ack` records an acknowledgement.
@@ -104,3 +106,5 @@ The Scenario Lab is stateless: it validates simulator input bounds, compares val
 The canvas renderer makes fictional scenes (upright, seated, floor-level transition, or occluded). The demo maps each generated posture to geometric features. `/api/vision/predict` computes a transparent weighted pattern score and confidence gate. This is a computer-vision concept demo, not a trained vision model, medical device, actual fall detector, or validated risk predictor. It does not request camera permissions and transmits only numbers. Low-quality synthetic frames produce a withheld result. Every “next move” is a simulated caregiver-workflow prompt, not a clinical intervention.
 
 The in-app **How to demo** guide walks participants through the sensor scenarios, Scenario Lab, independent review, generated-scene analysis, and caregiver acknowledgement. The Review Agent’s independent recomputation is intentionally explainable and deterministic so judges can inspect the checks; it is not marketed as a general-purpose AI agent.
+
+The Home Device Adapters provide a vendor-neutral mock envelope with a simulator device ID, timestamp, normalized measurement codes/units, and synthetic quality metadata. The UI can request a baseline or variation packet and displays both its measurements and JSON response. These routes do not claim compatibility with any specific vendor SDK or FHIR implementation and return no medical interpretation. They neither collect external device credentials nor connect to hardware.
