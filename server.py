@@ -24,6 +24,7 @@ DEVICE_CATALOG = {
     "smart_scale": {"name": "Connected scale", "metrics": [("body_weight", "kg", 68.4, 70.2)]},
     "glucose_meter": {"name": "Glucose meter", "metrics": [("blood_glucose", "mg/dL", 98, 164)]},
 }
+LAST_VISION_EVENT_AT = 0.0
 NOTES = {
     "en": {"tired": ("Seems more tired than usual", "Seems more tired than usual"), "comfortable": ("Rested and comfortable", "Rested and comfortable"), "breathing": ("Breathing seems harder than usual", "Breathing seems harder than usual")},
     "hi": {"tired": ("आज सामान्य से अधिक थकान लग रही है", "Seems more tired than usual"), "comfortable": ("आराम में और सहज लग रहे हैं", "Rested and comfortable"), "breathing": ("साँस लेने में सामान्य से अधिक कठिनाई लग रही है", "Breathing seems harder than usual")},
@@ -46,6 +47,37 @@ def simulate_device_packet(body):
             "observed_at": now, "measurements": measurements,
             "quality": {"status": "synthetic", "mode": mode}, "simulation_only": True,
             "clinical_interpretation": None, "note": "No real device is connected; sample values are fictional."}
+
+
+def accept_vision_event(body):
+    """Store an alert from local pose analysis. Accept event metadata only, never images or landmarks."""
+    global LAST_VISION_EVENT_AT
+    if any(key in body for key in ("image", "frame", "video", "landmarks", "image_data", "jpeg", "base64")):
+        raise ValueError("This endpoint accepts event metadata only; image/video data is not accepted.")
+    if body.get("event_type") != "possible_floor_level_transition":
+        raise ValueError("Unsupported event type.")
+    try:
+        confidence = float(body.get("pose_visibility"))
+        duration = float(body.get("duration_seconds"))
+    except (TypeError, ValueError):
+        raise ValueError("Provide numeric pose_visibility and duration_seconds.")
+    if not 0.75 <= confidence <= 1 or not 1.5 <= duration <= 30:
+        raise ValueError("Event does not meet the demo confidence/duration gate.")
+    zone = str(body.get("zone", "camera-zone-1"))
+    if not 1 <= len(zone) <= 40 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in zone):
+        raise ValueError("Zone must be a short generic label using letters, numbers, hyphens, or underscores.")
+    reasons = ["Possible floor-level posture transition from on-device pose landmarks", f"Local demo confidence {round(confidence * 100)}% · sustained {round(duration, 1)} seconds", f"Zone: {zone}", "Caregiver confirmation required; this is not a fall diagnosis"]
+    now = time.time()
+    if now - LAST_VISION_EVENT_AT < 15:
+        raise ValueError("A recent possible-event alert was just sent; wait briefly before another demo alert.")
+    with connect() as db:
+        cur = db.execute("INSERT INTO alerts(at,level,score,reasons,state,kind) VALUES(?,?,?,?, 'Open', ?)",
+                         (now, "medium", confidence, json.dumps(reasons), "vision_possible_event"))
+        alert_id = cur.lastrowid
+    LAST_VISION_EVENT_AT = now
+    return {"ok": True, "alert_id": alert_id, "event_type": "possible_floor_level_transition",
+            "pose_visibility": confidence, "message": "Possible-event alert added for caregiver review.",
+            "image_received": False, "state": state()}
 
 
 def connect():
@@ -210,6 +242,9 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception: return self.send_json({"error": "Invalid JSON"}, 400)
         if path == "/api/devices/simulate":
             try: return self.send_json(simulate_device_packet(body))
+            except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
+        if path == "/api/vision/events":
+            try: return self.send_json(accept_vision_event(body), 201)
             except (ValueError, TypeError) as exc: return self.send_json({"error": str(exc)}, 400)
         if path == "/api/simulator/evaluate":
             try: return self.send_json(scenario_evaluation(body))
